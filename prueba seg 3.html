@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Ecojet Radar Operacional PRO</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<style>
+body{
+margin:0;
+background:#0b0f14;
+color:#e6f1ff;
+font-family:Consolas;
+}
+
+header{
+background:#111;
+padding:10px;
+display:flex;
+justify-content:space-between;
+align-items:center;
+}
+
+button{
+margin:3px;
+padding:6px;
+border-radius:6px;
+border:none;
+cursor:pointer;
+}
+
+.container{
+display:grid;
+grid-template-columns:2fr 1fr;
+height:calc(100vh - 60px);
+}
+
+table{
+width:100%;
+border-collapse:collapse;
+font-size:13px;
+}
+
+td,th{
+padding:6px;
+border-bottom:1px solid #222;
+text-align:center;
+}
+
+input,select{
+background:#111;
+color:white;
+border:1px solid #333;
+padding:3px;
+}
+
+.progress{
+height:8px;
+background:#222;
+border-radius:10px;
+overflow:hidden;
+}
+
+.progress div{
+height:100%;
+background:lime;
+transition:width 0.4s linear;
+}
+
+#map{
+height:100%;
+}
+
+/* avión */
+.plane{
+font-size:18px;
+transition:transform 0.3s linear;
+transform-origin:center;
+}
+</style>
+</head>
+
+<body>
+
+<header>
+<h3>✈ ECOJET RADAR OPERACIONAL PRO</h3>
+<div>
+<button onclick="openModal()">+ Vuelo</button>
+<button onclick="importar()">📥 Importar</button>
+</div>
+</header>
+
+<div class="container">
+
+<div>
+<table>
+<thead>
+<tr>
+<th>Vuelo</th>
+<th>Origen</th>
+<th>Destino</th>
+<th>ETD</th>
+<th>ETA</th>
+<th>ETD REAL</th>
+<th>ETA REAL</th>
+<th>DEMORA</th>
+<th>ESTADO</th>
+<th>PROGRESO</th>
+<th></th>
+</tr>
+</thead>
+<tbody id="tb"></tbody>
+</table>
+</div>
+
+<div id="map"></div>
+
+</div>
+
+<!-- MODAL -->
+<div id="modal" style="display:none;position:fixed;top:20%;left:40%;background:#000;padding:10px">
+<input id="vuelo" placeholder="Vuelo"><br>
+<input id="origen" placeholder="SLCB"><br>
+<input id="destino" placeholder="SLVR"><br>
+<input id="etd" type="time"><br>
+<input id="eta" type="time"><br>
+<button onclick="saveFlight()">Guardar</button>
+<button onclick="closeModal()">Cerrar</button>
+</div>
+
+<script>
+
+let flights = JSON.parse(localStorage.getItem("ecojet") || "[]");
+
+const airports = {
+SLCB: [-17.42,-66.18],
+SLVR: [-17.64,-63.13],
+SLLP: [-16.51,-68.19],
+SLCO: [-19.01,-65.28],
+SLTJ: [-21.55,-64.70]
+};
+
+/* MAPA */
+let map = L.map('map').setView([-16.5,-64.5], 5);
+
+L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', {
+maxZoom: 19
+}).addTo(map);
+
+let polyLines = [];
+let planes = [];
+
+/* STORAGE */
+function saveStore(){
+localStorage.setItem("ecojet", JSON.stringify(flights));
+}
+
+/* MODAL */
+function openModal(){document.getElementById("modal").style.display="block";}
+function closeModal(){document.getElementById("modal").style.display="none";}
+
+/* CREAR */
+function saveFlight(){
+flights.push({
+vuelo:vuelo.value,
+origen:origen.value,
+destino:destino.value,
+etd:etd.value,
+eta:eta.value,
+etd_real:"",
+eta_real:"",
+estado:"PLAN"
+});
+
+saveStore();
+closeModal();
+render();
+}
+
+/* TIEMPO */
+function parseTime(t){
+if(!t) return null;
+let [h,m]=t.split(":");
+let d=new Date();
+d.setHours(h,m,0,0);
+return d;
+}
+
+/* PROGRESO */
+function progress(f){
+let s = parseTime(f.etd_real || f.etd);
+let e = parseTime(f.eta_real || f.eta);
+if(!s || !e) return 0;
+
+let now = new Date();
+if(now <= s) return 0;
+if(now >= e) return 1;
+
+return (now - s)/(e - s);
+}
+
+/* DEMORA */
+function delay(f){
+if(!f.etd_real) return 0;
+return Math.max(0,
+Math.round((parseTime(f.etd_real)-parseTime(f.etd))/60000)
+);
+}
+
+/* RUMBO */
+function bearing(o,d){
+return Math.atan2(d[1]-o[1], d[0]-o[0]) * 180 / Math.PI;
+}
+
+/* UPDATE */
+function setETDReal(i,v){flights[i].etd_real=v;saveStore();render();}
+function setETAReal(i,v){flights[i].eta_real=v;saveStore();render();}
+function setEstado(i,v){flights[i].estado=v;saveStore();render();}
+
+function eliminar(i){
+if(confirm("Eliminar vuelo?")){
+flights.splice(i,1);
+saveStore();
+render();
+}
+}
+
+/* IMPORT */
+function importar(){
+let t=prompt("VUELO ORIGEN DESTINO ETD ETA");
+if(!t) return;
+
+t.split("\n").forEach(f=>{
+let c=f.trim().split(/\s+/);
+if(c.length>=5){
+flights.push({
+vuelo:c[0],
+origen:c[1],
+destino:c[2],
+etd:c[3],
+eta:c[4],
+etd_real:"",
+eta_real:"",
+estado:"PLAN"
+});
+}
+});
+
+saveStore();
+render();
+}
+
+/* LIMPIAR MAPA */
+function clearMap(){
+polyLines.forEach(l=>map.removeLayer(l));
+planes.forEach(p=>map.removeLayer(p));
+polyLines=[];
+planes=[];
+}
+
+/* RENDER */
+function render(){
+
+let tb=document.getElementById("tb");
+tb.innerHTML="";
+
+clearMap();
+
+flights.forEach((f,i)=>{
+
+let p=Math.round(progress(f)*100);
+
+tb.innerHTML+=`
+<tr>
+<td>${f.vuelo}</td>
+<td>${f.origen}</td>
+<td>${f.destino}</td>
+<td>${f.etd}</td>
+<td>${f.eta}</td>
+
+<td><input type="time" value="${f.etd_real}" onchange="setETDReal(${i},this.value)"></td>
+<td><input type="time" value="${f.eta_real}" onchange="setETAReal(${i},this.value)"></td>
+
+<td>${delay(f)} min</td>
+
+<td>
+<select onchange="setEstado(${i},this.value)">
+<option ${f.estado=="PLAN"?"selected":""}>PLAN</option>
+<option ${f.estado=="BOARDING"?"selected":""}>BOARDING</option>
+<option ${f.estado=="TAXI"?"selected":""}>TAXI</option>
+<option ${f.estado=="EN RUTA"?"selected":""}>EN RUTA</option>
+<option ${f.estado=="ARRIBADO"?"selected":""}>ARRIBADO</option>
+</select>
+</td>
+
+<td>
+<div class="progress"><div style="width:${p}%"></div></div>
+</td>
+
+<td><button onclick="eliminar(${i})">✖</button></td>
+</tr>
+`;
+
+let o=airports[f.origen];
+let d=airports[f.destino];
+
+if(o && d && f.estado!=="PLAN"){
+
+let line=L.polyline([o,d],{
+color: delay(f)>0 ? "red":"lime"
+}).addTo(map);
+
+polyLines.push(line);
+
+/* avión animado */
+let lat=o[0]+(d[0]-o[0])*progress(f);
+let lon=o[1]+(d[1]-o[1])*progress(f);
+
+let icon=L.divIcon({
+html:`<div class="plane" style="transform:rotate(${bearing(o,d)}deg)">✈</div>`
+});
+
+let marker=L.marker([lat,lon],{icon}).addTo(map);
+planes.push(marker);
+
+marker.bindPopup(f.vuelo);
+}
+
+});
+
+}
+
+/* LOOP SUAVE */
+setInterval(render, 4000);
+
+render();
+
+</script>
+
+</body>
+</html>
